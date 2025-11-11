@@ -206,10 +206,10 @@ class AutonomousTradingBot:
         # Use high liquidity symbols for scalping
         if self.scalping_enabled:
             symbols_to_analyze = self.symbols_to_trade
-            min_confidence = 0.6  # Higher confidence threshold for scalping
+            min_confidence = 0.75  # STRICT: Higher confidence threshold for zero-loss strategy
         else:
             symbols_to_analyze = self.nifty_symbols + self.stock_symbols
-            min_confidence = 0.5
+            min_confidence = 0.70  # STRICT: Higher confidence threshold for zero-loss strategy
         
         logger.info(f"Analyzing {len(symbols_to_analyze)} symbols...")
         for symbol in symbols_to_analyze:
@@ -263,6 +263,21 @@ class AutonomousTradingBot:
             # Calculate stop loss
             stop_loss = self.risk_management.calculate_stop_loss(price, signal)
             
+            # Calculate take profit
+            take_profit = self.risk_management.calculate_take_profit(price, signal)
+            
+            # ZERO-LOSS STRATEGY: Validate risk/reward ratio before entering trade
+            risk_reward_validation = self.risk_management.validate_risk_reward_ratio(
+                entry_price=price,
+                stop_loss_price=stop_loss,
+                take_profit_price=take_profit,
+                side=signal
+            )
+            
+            if not risk_reward_validation['valid']:
+                logger.warning(f"Trade rejected for {symbol}: {risk_reward_validation['message']}")
+                return False
+            
             # Calculate position size
             quantity = self.risk_management.calculate_position_size(
                 account_value, price, stop_loss
@@ -276,6 +291,8 @@ class AutonomousTradingBot:
             if not validation['valid']:
                 logger.warning(f"Trade validation failed for {symbol}: {validation['message']}")
                 return False
+            
+            logger.info(f"Risk/Reward validated: {risk_reward_validation['risk_reward_ratio']:.2f} for {symbol}")
             
             # Place order
             logger.info(f"Executing {signal} order for {symbol}: {quantity} units at {price}")
@@ -293,9 +310,10 @@ class AutonomousTradingBot:
                     'quantity': quantity,
                     'side': signal,
                     'stop_loss': stop_loss,
-                    'take_profit': self.risk_management.calculate_take_profit(price, signal),
+                    'take_profit': take_profit,
                     'entry_time': datetime.now(),
-                    'order_id': order_result.get('order_id')
+                    'order_id': order_result.get('order_id'),
+                    'breakeven_activated': False  # Track breakeven status for zero-loss strategy
                 }
                 
                 self.trade_history.append({
@@ -347,8 +365,12 @@ class AutonomousTradingBot:
                         side=position_info['side'],
                         entry_time=position_info['entry_time'],
                         highest_price=position_info.get('highest_price'),
-                        lowest_price=position_info.get('lowest_price')
+                        lowest_price=position_info.get('lowest_price'),
+                        breakeven_activated=position_info.get('breakeven_activated', False)
                     )
+                    # Update breakeven status
+                    if exit_decision.get('breakeven_activated', False):
+                        position_info['breakeven_activated'] = True
                 else:
                     exit_decision = self.risk_management.should_exit_position(
                         entry_price=position_info['entry_price'],
@@ -372,7 +394,13 @@ class AutonomousTradingBot:
                         if position_info['side'] == 'SELL':
                             pnl = -pnl
                         
-                        logger.info(f"Position closed: {symbol}, P&L: {pnl:.2f}, Reason: {exit_decision['reason']}")
+                        # Log with zero-loss strategy message if applicable
+                        exit_message = exit_decision.get('message', exit_decision['reason'])
+                        logger.info(f"Position closed: {symbol}, P&L: {pnl:.2f}, Reason: {exit_message}")
+                        
+                        # Warn if loss occurred (shouldn't happen with zero-loss strategy)
+                        if pnl < 0:
+                            logger.error(f"⚠️ LOSS DETECTED: {symbol} closed with loss of {pnl:.2f}. This violates zero-loss policy!")
                         
                         # Record trade in profit tracker
                         self.profit_tracker.record_trade(

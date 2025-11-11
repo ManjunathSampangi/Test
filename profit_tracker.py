@@ -148,6 +148,7 @@ class ProfitTracker:
     def should_continue_trading(self) -> Dict[str, any]:
         """
         Check if bot should continue trading based on performance
+        ZERO-LOSS STRATEGY: Stop trading immediately on any loss
         
         Returns:
             Dictionary with decision and reasons
@@ -159,6 +160,12 @@ class ProfitTracker:
         
         reasons = []
         should_continue = True
+        
+        # ZERO-LOSS STRATEGY: Stop trading immediately if daily profit is negative
+        if daily_profit < 0:
+            should_continue = False
+            reasons.append(f"ZERO-LOSS POLICY: Daily profit is negative: {daily_profit:.2f}. Stopping to prevent further losses.")
+            logger.warning(f"Trading stopped due to negative daily profit: {daily_profit:.2f}")
         
         # Check daily loss limit
         if daily_profit <= self.daily_loss_limit:
