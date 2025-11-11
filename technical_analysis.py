@@ -15,10 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 class TechnicalAnalysis:
-    def __init__(self):
-        """Initialize Technical Analysis module"""
+    def __init__(self, config: Dict = None):
+        """
+        Initialize Technical Analysis module
+        
+        Args:
+            config: Configuration dictionary for scalping parameters
+        """
         self.scaler = StandardScaler()
         self.model = None
+        self.config = config or {}
         
     def calculate_rsi(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
         """
@@ -140,7 +146,7 @@ class TechnicalAnalysis:
     
     def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Generate technical indicators as features
+        Generate technical indicators as features (optimized for scalping)
         
         Args:
             df: DataFrame with OHLCV data
@@ -150,43 +156,185 @@ class TechnicalAnalysis:
         """
         features_df = df.copy()
         
-        # RSI
-        features_df['rsi'] = self.calculate_rsi(df)
+        # Get scalping parameters from config
+        rsi_period = self.config.get('rsi_period', 9)
+        macd_fast = self.config.get('macd_fast', 8)
+        macd_slow = self.config.get('macd_slow', 21)
+        macd_signal = self.config.get('macd_signal', 5)
+        bb_period = self.config.get('bb_period', 10)
+        bb_std = self.config.get('bb_std', 1.5)
+        ema_fast = self.config.get('ema_fast', 5)
+        ema_slow = self.config.get('ema_slow', 13)
         
-        # MACD
-        macd_data = self.calculate_macd(df)
+        # RSI (faster for scalping)
+        features_df['rsi'] = self.calculate_rsi(df, period=rsi_period)
+        
+        # MACD (optimized for scalping)
+        macd_data = self.calculate_macd(df, fast=macd_fast, slow=macd_slow, signal=macd_signal)
         features_df['macd'] = macd_data['macd']
         features_df['macd_signal'] = macd_data['signal']
         features_df['macd_histogram'] = macd_data['histogram']
         
-        # Bollinger Bands
-        bb_data = self.calculate_bollinger_bands(df)
+        # Bollinger Bands (tighter for scalping)
+        bb_data = self.calculate_bollinger_bands(df, period=bb_period, std_dev=bb_std)
         features_df['bb_upper'] = bb_data['upper']
         features_df['bb_middle'] = bb_data['middle']
         features_df['bb_lower'] = bb_data['lower']
         features_df['bb_width'] = (bb_data['upper'] - bb_data['lower']) / bb_data['middle']
         features_df['bb_position'] = (df['close'] - bb_data['lower']) / (bb_data['upper'] - bb_data['lower'])
         
-        # ATR
-        features_df['atr'] = self.calculate_atr(df)
+        # ATR (for volatility)
+        features_df['atr'] = self.calculate_atr(df, period=9)
         
-        # Moving Averages
-        features_df['sma_20'] = self.calculate_sma(df, 20)
-        features_df['sma_50'] = self.calculate_sma(df, 50)
-        features_df['ema_12'] = self.calculate_ema(df, 12)
-        features_df['ema_26'] = self.calculate_ema(df, 26)
+        # Fast EMAs for scalping
+        features_df['ema_fast'] = self.calculate_ema(df, ema_fast)
+        features_df['ema_slow'] = self.calculate_ema(df, ema_slow)
         
-        # Price changes
+        # Price momentum (critical for scalping)
         features_df['price_change'] = df['close'].pct_change()
-        features_df['volume_change'] = df['volume'].pct_change()
+        features_df['price_change_3'] = df['close'].pct_change(periods=3)
+        features_df['momentum'] = df['close'].diff(3) / df['close'].shift(3)
         
-        # Volatility
-        features_df['volatility'] = df['close'].rolling(window=20).std()
+        # Volume analysis (important for scalping)
+        features_df['volume_change'] = df['volume'].pct_change()
+        features_df['volume_ma'] = df['volume'].rolling(window=10).mean()
+        features_df['volume_ratio'] = df['volume'] / features_df['volume_ma']
+        
+        # Volatility (short-term)
+        features_df['volatility'] = df['close'].rolling(window=10).std()
+        features_df['volatility_pct'] = features_df['volatility'] / df['close']
+        
+        # Price position in recent range
+        features_df['high_5'] = df['high'].rolling(window=5).max()
+        features_df['low_5'] = df['low'].rolling(window=5).min()
+        features_df['range_position'] = (df['close'] - features_df['low_5']) / (features_df['high_5'] - features_df['low_5'])
         
         return features_df
     
+    def generate_scalping_signal(self, df: pd.DataFrame, volume_threshold: float = 1.5,
+                                 min_volume: int = 10000, momentum_threshold: float = 0.1) -> Dict[str, any]:
+        """
+        Generate scalping-specific trading signal
+        
+        Args:
+            df: DataFrame with OHLCV and technical indicators
+            volume_threshold: Minimum volume ratio threshold
+            min_volume: Minimum absolute volume
+            momentum_threshold: Minimum momentum threshold
+            
+        Returns:
+            Dictionary with signal, confidence, and details
+        """
+        if len(df) < 20:
+            return {
+                'signal': 'HOLD',
+                'confidence': 0.0,
+                'reason': 'Insufficient data for scalping'
+            }
+        
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        # Check volume requirement (critical for scalping)
+        if latest.get('volume', 0) < min_volume:
+            return {
+                'signal': 'HOLD',
+                'confidence': 0.0,
+                'reason': f'Low volume: {latest.get("volume", 0)}'
+            }
+        
+        if latest.get('volume_ratio', 0) < volume_threshold:
+            return {
+                'signal': 'HOLD',
+                'confidence': 0.0,
+                'reason': f'Volume below threshold: {latest.get("volume_ratio", 0):.2f}'
+            }
+        
+        signals = []
+        confidence_scores = []
+        
+        # Get thresholds from config
+        rsi_oversold = self.config.get('rsi_oversold', 25)
+        rsi_overbought = self.config.get('rsi_overbought', 75)
+        
+        # Strong momentum signals (high priority for scalping)
+        if latest.get('momentum', 0) > momentum_threshold:
+            signals.append('BUY')
+            confidence_scores.append(0.4)
+        elif latest.get('momentum', 0) < -momentum_threshold:
+            signals.append('SELL')
+            confidence_scores.append(0.4)
+        
+        # RSI extremes (more sensitive for scalping)
+        if latest['rsi'] < rsi_oversold:
+            signals.append('BUY')
+            confidence_scores.append(0.35)
+        elif latest['rsi'] > rsi_overbought:
+            signals.append('SELL')
+            confidence_scores.append(0.35)
+        
+        # MACD crossover (faster for scalping)
+        if latest['macd'] > latest['macd_signal'] and prev['macd'] <= prev['macd_signal']:
+            signals.append('BUY')
+            confidence_scores.append(0.4)
+        elif latest['macd'] < latest['macd_signal'] and prev['macd'] >= prev['macd_signal']:
+            signals.append('SELL')
+            confidence_scores.append(0.4)
+        
+        # EMA crossover (fast EMAs for scalping)
+        if latest['ema_fast'] > latest['ema_slow'] and prev['ema_fast'] <= prev['ema_slow']:
+            signals.append('BUY')
+            confidence_scores.append(0.3)
+        elif latest['ema_fast'] < latest['ema_slow'] and prev['ema_fast'] >= prev['ema_slow']:
+            signals.append('SELL')
+            confidence_scores.append(0.3)
+        
+        # Bollinger Bands (tighter bands for scalping)
+        if latest['close'] < latest['bb_lower']:
+            signals.append('BUY')
+            confidence_scores.append(0.25)
+        elif latest['close'] > latest['bb_upper']:
+            signals.append('SELL')
+            confidence_scores.append(0.25)
+        
+        # Range position (quick reversal signals)
+        if latest.get('range_position', 0.5) < 0.2:
+            signals.append('BUY')
+            confidence_scores.append(0.2)
+        elif latest.get('range_position', 0.5) > 0.8:
+            signals.append('SELL')
+            confidence_scores.append(0.2)
+        
+        # Determine final signal
+        buy_count = signals.count('BUY')
+        sell_count = signals.count('SELL')
+        
+        if buy_count > sell_count and buy_count >= 2:  # Require at least 2 signals
+            signal = 'BUY'
+            confidence = min(sum(confidence_scores[:buy_count]) / buy_count, 1.0)
+        elif sell_count > buy_count and sell_count >= 2:
+            signal = 'SELL'
+            confidence = min(sum(confidence_scores[:sell_count]) / sell_count, 1.0)
+        else:
+            signal = 'HOLD'
+            confidence = 0.0
+        
+        return {
+            'signal': signal,
+            'confidence': confidence,
+            'rsi': latest['rsi'],
+            'macd': latest['macd'],
+            'macd_signal': latest['macd_signal'],
+            'momentum': latest.get('momentum', 0),
+            'volume_ratio': latest.get('volume_ratio', 0),
+            'bb_position': latest['bb_position'],
+            'price': latest['close'],
+            'volume': latest.get('volume', 0),
+            'reason': f'RSI: {latest["rsi"]:.2f}, Momentum: {latest.get("momentum", 0):.3f}, Vol: {latest.get("volume_ratio", 0):.2f}'
+        }
+    
     def generate_signal(self, df: pd.DataFrame, rsi_oversold: int = 30, 
-                       rsi_overbought: int = 70) -> Dict[str, any]:
+                       rsi_overbought: int = 70, use_scalping: bool = True) -> Dict[str, any]:
         """
         Generate trading signal based on technical indicators
         
@@ -194,10 +342,18 @@ class TechnicalAnalysis:
             df: DataFrame with OHLCV and technical indicators
             rsi_oversold: RSI oversold threshold
             rsi_overbought: RSI overbought threshold
+            use_scalping: Use scalping-specific signal generation
             
         Returns:
             Dictionary with signal, confidence, and details
         """
+        if use_scalping:
+            volume_threshold = self.config.get('volume_threshold_multiplier', 1.5)
+            min_volume = self.config.get('min_volume', 10000)
+            momentum_threshold = self.config.get('momentum_threshold', 0.1)
+            return self.generate_scalping_signal(df, volume_threshold, min_volume, momentum_threshold)
+        
+        # Original signal generation (fallback)
         if len(df) < 50:
             return {
                 'signal': 'HOLD',
@@ -236,12 +392,14 @@ class TechnicalAnalysis:
             confidence_scores.append(0.3)
         
         # Moving Average crossover
-        if latest['ema_12'] > latest['ema_26'] and prev['ema_12'] <= prev['ema_26']:
-            signals.append('BUY')
-            confidence_scores.append(0.2)
-        elif latest['ema_12'] < latest['ema_26'] and prev['ema_12'] >= prev['ema_26']:
-            signals.append('SELL')
-            confidence_scores.append(0.2)
+        if latest.get('ema_fast', latest.get('ema_12', 0)) > latest.get('ema_slow', latest.get('ema_26', 0)):
+            if prev.get('ema_fast', prev.get('ema_12', 0)) <= prev.get('ema_slow', prev.get('ema_26', 0)):
+                signals.append('BUY')
+                confidence_scores.append(0.2)
+        elif latest.get('ema_fast', latest.get('ema_12', 0)) < latest.get('ema_slow', latest.get('ema_26', 0)):
+            if prev.get('ema_fast', prev.get('ema_12', 0)) >= prev.get('ema_slow', prev.get('ema_26', 0)):
+                signals.append('SELL')
+                confidence_scores.append(0.2)
         
         # Determine final signal
         buy_count = signals.count('BUY')

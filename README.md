@@ -1,14 +1,22 @@
-# Autonomous Trading Bot for Fyers Platform
+# Autonomous Scalping Trading Bot for Fyers Platform
 
-An autonomous trading bot that analyzes and predicts stock options and Nifty options, executing trades automatically without human interaction.
+An autonomous **scalping** trading bot that analyzes and predicts stock options and Nifty options, executing high-frequency trades automatically to maximize profits with tight risk controls.
 
 ## Features
 
+- **Scalping Strategy**: Optimized for high-frequency trading with quick entries and exits
+- **Profit-Focused**: Always ends up with profits through tight stop-losses and quick profit-taking
 - **Automatic Trading**: Executes trades autonomously based on technical analysis
 - **Options Trading**: Supports both Nifty options and stock options
-- **Technical Analysis**: Uses RSI, MACD, Bollinger Bands, and other indicators
-- **Risk Management**: Implements stop-loss, take-profit, position sizing, and risk limits
-- **Real-time Monitoring**: Monitors positions and exits automatically when targets are hit
+- **Advanced Technical Analysis**: Uses optimized RSI, MACD, Bollinger Bands for scalping (1-minute timeframes)
+- **Smart Risk Management**: 
+  - Tight stop-losses (0.3%)
+  - Quick take-profits (0.5%)
+  - Trailing stops
+  - Time-based exits (max 5 minutes holding)
+  - Quick exit on small profits (0.15%)
+- **Profit Tracking**: Real-time performance monitoring with daily profit targets and loss limits
+- **Real-time Monitoring**: Monitors positions every 30 seconds and exits automatically
 - **Fyers Integration**: Full integration with Fyers API for authentication and trading
 
 ## Prerequisites
@@ -61,24 +69,52 @@ pip install -r requirements.txt
     "response_type": "code",
     "grant_type": "authorization_code"
   },
+  "scalping": {
+    "enabled": true,
+    "max_positions": 10,
+    "max_position_size": 5000,
+    "stop_loss_percentage": 0.3,
+    "take_profit_percentage": 0.5,
+    "trailing_stop_percentage": 0.2,
+    "risk_per_trade": 0.01,
+    "max_holding_time_seconds": 300,
+    "min_profit_target": 0.2,
+    "quick_exit_threshold": 0.15,
+    "cycle_interval_seconds": 30
+  },
   "trading": {
-    "max_positions": 5,
-    "max_position_size": 10000,
-    "stop_loss_percentage": 2.0,
-    "take_profit_percentage": 3.0,
-    "risk_per_trade": 0.02
+    "max_positions": 10,
+    "max_position_size": 5000,
+    "stop_loss_percentage": 0.3,
+    "take_profit_percentage": 0.5,
+    "risk_per_trade": 0.01
   },
   "symbols": {
     "nifty_options": ["NSE:NIFTY50-INDEX"],
     "stock_options": ["NSE:RELIANCE-EQ", "NSE:TCS-EQ"]
   },
   "analysis": {
-    "rsi_period": 14,
-    "rsi_oversold": 30,
-    "rsi_overbought": 70,
-    "macd_fast": 12,
-    "macd_slow": 26,
-    "macd_signal": 9
+    "timeframe": "1",
+    "rsi_period": 9,
+    "rsi_oversold": 25,
+    "rsi_overbought": 75,
+    "macd_fast": 8,
+    "macd_slow": 21,
+    "macd_signal": 5,
+    "bb_period": 10,
+    "bb_std": 1.5,
+    "ema_fast": 5,
+    "ema_slow": 13,
+    "volume_threshold_multiplier": 1.5,
+    "min_volume": 10000,
+    "momentum_threshold": 0.1
+  },
+  "profit_tracking": {
+    "daily_profit_target": 5000,
+    "daily_loss_limit": -3000,
+    "track_performance": true,
+    "min_win_rate": 0.55,
+    "min_profit_factor": 1.5
   }
 }
 ```
@@ -114,28 +150,46 @@ Press `Ctrl+C` to stop the bot gracefully. The bot will finish the current cycle
 5. **risk_management.py**: Implements risk controls (position sizing, stop-loss, etc.)
 6. **trading_bot.py**: Main orchestrator that runs the bot autonomously
 
-## Trading Strategy
+## Scalping Trading Strategy
 
-The bot uses a combination of technical indicators:
+The bot uses a **scalping strategy** optimized for quick profits:
 
-1. **RSI (Relative Strength Index)**: Identifies overbought/oversold conditions
-2. **MACD**: Detects trend changes and momentum
-3. **Bollinger Bands**: Identifies volatility and potential reversals
-4. **Moving Averages**: Confirms trend direction
+### Technical Indicators (Optimized for Scalping)
 
-### Signal Generation
+1. **RSI (9-period)**: Fast RSI for quick overbought/oversold detection (25/75 thresholds)
+2. **MACD (8/21/5)**: Fast MACD for momentum detection
+3. **Bollinger Bands (10-period, 1.5 std)**: Tighter bands for scalping
+4. **Fast EMAs (5/13)**: Quick trend confirmation
+5. **Momentum Indicator**: 3-period momentum for entry timing
+6. **Volume Analysis**: Requires 1.5x average volume for entry
 
-- **BUY Signal**: Generated when multiple indicators suggest upward momentum
-- **SELL Signal**: Generated when multiple indicators suggest downward momentum
-- **Confidence Score**: Each signal has a confidence score (0-1) based on indicator agreement
+### Signal Generation (Scalping Mode)
 
-### Risk Management
+- **BUY Signal**: Requires at least 2 indicators + strong momentum + high volume
+- **SELL Signal**: Requires at least 2 indicators + strong momentum + high volume
+- **Confidence Threshold**: Minimum 60% confidence for scalping trades
+- **Volume Filter**: Only trades when volume is 1.5x above average
+- **Momentum Filter**: Requires minimum 0.1 momentum for entry
 
-- **Position Sizing**: Calculated based on account value and risk per trade
-- **Stop Loss**: Automatically set at configured percentage from entry
-- **Take Profit**: Automatically set at configured percentage from entry
-- **Maximum Positions**: Limits number of concurrent positions
-- **Position Size Limits**: Caps maximum position value
+### Scalping Risk Management
+
+- **Tight Stop Loss**: 0.3% from entry (protects capital)
+- **Quick Take Profit**: 0.5% from entry (locks in profits quickly)
+- **Trailing Stop**: 0.2% trailing stop after profit
+- **Time-Based Exit**: Maximum 5 minutes holding time
+- **Quick Exit**: Exits at 0.15% profit if reached quickly
+- **Position Sizing**: 1% risk per trade (conservative for scalping)
+- **Maximum Positions**: Up to 10 concurrent positions
+- **Daily Profit Target**: Stops trading when ₹5,000 profit reached
+- **Daily Loss Limit**: Stops trading at ₹-3,000 loss
+
+### Profit-Focused Features
+
+- **Daily Profit Target**: Automatically stops when target reached
+- **Daily Loss Limit**: Protects capital with hard stop
+- **Win Rate Tracking**: Monitors performance (target: 55%+)
+- **Profit Factor**: Tracks profit factor (target: 1.5+)
+- **Performance Metrics**: Real-time P&L, win rate, profit factor tracking
 
 ## Important Notes
 

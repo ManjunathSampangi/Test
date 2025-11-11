@@ -12,19 +12,36 @@ logger = logging.getLogger(__name__)
 
 
 class RiskManagement:
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, scalping_config: Dict = None):
         """
         Initialize Risk Management module
         
         Args:
             config: Configuration dictionary with risk parameters
+            scalping_config: Scalping-specific configuration
         """
         self.config = config
-        self.max_positions = config.get('max_positions', 5)
-        self.max_position_size = config.get('max_position_size', 10000)
-        self.stop_loss_percentage = config.get('stop_loss_percentage', 2.0)
-        self.take_profit_percentage = config.get('take_profit_percentage', 3.0)
-        self.risk_per_trade = config.get('risk_per_trade', 0.02)  # 2% of capital
+        self.scalping_config = scalping_config or {}
+        
+        # Use scalping config if available, otherwise use regular config
+        if self.scalping_config.get('enabled', False):
+            self.max_positions = self.scalping_config.get('max_positions', 10)
+            self.max_position_size = self.scalping_config.get('max_position_size', 5000)
+            self.stop_loss_percentage = self.scalping_config.get('stop_loss_percentage', 0.3)
+            self.take_profit_percentage = self.scalping_config.get('take_profit_percentage', 0.5)
+            self.trailing_stop_percentage = self.scalping_config.get('trailing_stop_percentage', 0.2)
+            self.risk_per_trade = self.scalping_config.get('risk_per_trade', 0.01)
+            self.max_holding_time = self.scalping_config.get('max_holding_time_seconds', 300)
+            self.quick_exit_threshold = self.scalping_config.get('quick_exit_threshold', 0.15)
+        else:
+            self.max_positions = config.get('max_positions', 5)
+            self.max_position_size = config.get('max_position_size', 10000)
+            self.stop_loss_percentage = config.get('stop_loss_percentage', 2.0)
+            self.take_profit_percentage = config.get('take_profit_percentage', 3.0)
+            self.trailing_stop_percentage = None
+            self.risk_per_trade = config.get('risk_per_trade', 0.02)
+            self.max_holding_time = None
+            self.quick_exit_threshold = None
         
     def calculate_position_size(self, account_value: float, entry_price: float,
                                stop_loss_price: float, risk_amount: Optional[float] = None) -> int:
@@ -224,4 +241,116 @@ class RiskManagement:
             'valid': is_valid,
             'checks': checks,
             'message': 'Trade validated' if is_valid else 'Trade failed risk checks'
+        }
+    
+    def should_exit_scalping_position(self, entry_price: float, current_price: float,
+                                     side: str, entry_time: datetime, 
+                                     highest_price: float = None, 
+                                     lowest_price: float = None) -> Dict[str, any]:
+        """
+        Determine if scalping position should be exited (with trailing stop and time-based exit)
+        
+        Args:
+            entry_price: Entry price
+            current_price: Current market price
+            side: 'BUY' or 'SELL'
+            entry_time: Entry timestamp
+            highest_price: Highest price since entry (for trailing stop)
+            lowest_price: Lowest price since entry (for trailing stop)
+            
+        Returns:
+            Dictionary with exit decision and reason
+        """
+        from datetime import datetime, timedelta
+        
+        # Check max holding time
+        if self.max_holding_time:
+            holding_time = (datetime.now() - entry_time).total_seconds()
+            if holding_time >= self.max_holding_time:
+                return {
+                    'should_exit': True,
+                    'reason': 'MAX_HOLDING_TIME',
+                    'holding_time': holding_time,
+                    'current_price': current_price
+                }
+        
+        # Quick exit threshold (small profit, exit quickly)
+        if self.quick_exit_threshold:
+            profit_pct = ((current_price - entry_price) / entry_price) * 100
+            if side == 'SELL':
+                profit_pct = -profit_pct
+            
+            if profit_pct >= self.quick_exit_threshold:
+                return {
+                    'should_exit': True,
+                    'reason': 'QUICK_EXIT',
+                    'profit_pct': profit_pct,
+                    'current_price': current_price
+                }
+        
+        # Regular stop loss and take profit
+        stop_loss = self.calculate_stop_loss(entry_price, side)
+        take_profit = self.calculate_take_profit(entry_price, side)
+        
+        if side == 'BUY':
+            if current_price <= stop_loss:
+                return {
+                    'should_exit': True,
+                    'reason': 'STOP_LOSS',
+                    'trigger_price': stop_loss,
+                    'current_price': current_price
+                }
+            elif current_price >= take_profit:
+                return {
+                    'should_exit': True,
+                    'reason': 'TAKE_PROFIT',
+                    'trigger_price': take_profit,
+                    'current_price': current_price
+                }
+            
+            # Trailing stop for long positions
+            if self.trailing_stop_percentage and highest_price:
+                trailing_stop = highest_price * (1 - self.trailing_stop_percentage / 100)
+                if current_price <= trailing_stop and current_price < highest_price:
+                    return {
+                        'should_exit': True,
+                        'reason': 'TRAILING_STOP',
+                        'trigger_price': trailing_stop,
+                        'current_price': current_price,
+                        'highest_price': highest_price
+                    }
+        else:  # SELL
+            if current_price >= stop_loss:
+                return {
+                    'should_exit': True,
+                    'reason': 'STOP_LOSS',
+                    'trigger_price': stop_loss,
+                    'current_price': current_price
+                }
+            elif current_price <= take_profit:
+                return {
+                    'should_exit': True,
+                    'reason': 'TAKE_PROFIT',
+                    'trigger_price': take_profit,
+                    'current_price': current_price
+                }
+            
+            # Trailing stop for short positions
+            if self.trailing_stop_percentage and lowest_price:
+                trailing_stop = lowest_price * (1 + self.trailing_stop_percentage / 100)
+                if current_price >= trailing_stop and current_price > lowest_price:
+                    return {
+                        'should_exit': True,
+                        'reason': 'TRAILING_STOP',
+                        'trigger_price': trailing_stop,
+                        'current_price': current_price,
+                        'lowest_price': lowest_price
+                    }
+        
+        return {
+            'should_exit': False,
+            'reason': 'HOLD',
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            'current_price': current_price
         }

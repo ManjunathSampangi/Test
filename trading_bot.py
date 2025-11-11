@@ -16,6 +16,7 @@ from market_data import MarketData
 from technical_analysis import TechnicalAnalysis
 from trading_execution import TradingExecution
 from risk_management import RiskManagement
+from profit_tracker import ProfitTracker
 
 load_dotenv()
 
@@ -42,22 +43,37 @@ class AutonomousTradingBot:
         with open(config_path, 'r') as f:
             self.config = json.load(f)
         
+        # Check if scalping is enabled
+        self.scalping_enabled = self.config.get('scalping', {}).get('enabled', False)
+        
         # Initialize components
         self.auth = FyersAuth()
         self.session = None
         self.market_data = None
-        self.technical_analysis = TechnicalAnalysis()
+        self.technical_analysis = TechnicalAnalysis(self.config.get('analysis', {}))
         self.trading_execution = None
-        self.risk_management = RiskManagement(self.config['trading'])
+        
+        # Initialize risk management with scalping config if enabled
+        scalping_config = self.config.get('scalping', {}) if self.scalping_enabled else None
+        self.risk_management = RiskManagement(self.config['trading'], scalping_config)
+        
+        # Initialize profit tracker
+        self.profit_tracker = ProfitTracker(self.config)
         
         # Trading state
         self.active_positions = {}
         self.trade_history = []
         self.is_running = False
         
-        # Symbols to trade
-        self.nifty_symbols = self.config['symbols'].get('nifty_options', [])
-        self.stock_symbols = self.config['symbols'].get('stock_options', [])
+        # Symbols to trade (prioritize high liquidity for scalping)
+        if self.scalping_enabled:
+            self.symbols_to_trade = self.config['symbols'].get('high_liquidity_symbols', [])
+            if not self.symbols_to_trade:
+                self.symbols_to_trade = (self.config['symbols'].get('nifty_options', []) + 
+                                       self.config['symbols'].get('stock_options', []))
+        else:
+            self.nifty_symbols = self.config['symbols'].get('nifty_options', [])
+            self.stock_symbols = self.config['symbols'].get('stock_options', [])
         
     def initialize(self) -> bool:
         """
@@ -115,7 +131,7 @@ class AutonomousTradingBot:
     
     def analyze_symbol(self, symbol: str) -> Dict:
         """
-        Analyze a symbol and generate trading signal
+        Analyze a symbol and generate trading signal (optimized for scalping)
         
         Args:
             symbol: Symbol to analyze
@@ -124,11 +140,16 @@ class AutonomousTradingBot:
             Analysis result dictionary
         """
         try:
-            # Get historical data
-            df = self.market_data.get_historical_data(symbol, resolution='15', range_from=None, range_to=None)
+            # Use 1-minute timeframe for scalping, 15-minute for regular trading
+            resolution = self.config.get('analysis', {}).get('timeframe', '1') if self.scalping_enabled else '15'
+            lookback_period = self.config.get('analysis', {}).get('lookback_period', 50) if self.scalping_enabled else 100
             
-            if df.empty or len(df) < 50:
-                logger.warning(f"Insufficient data for {symbol}")
+            # Get historical data
+            df = self.market_data.get_historical_data(symbol, resolution=resolution, range_from=None, range_to=None)
+            
+            min_data_points = 20 if self.scalping_enabled else 50
+            if df.empty or len(df) < min_data_points:
+                logger.warning(f"Insufficient data for {symbol}: {len(df)} candles")
                 return {
                     'symbol': symbol,
                     'signal': 'HOLD',
@@ -139,11 +160,12 @@ class AutonomousTradingBot:
             # Generate features
             features_df = self.technical_analysis.generate_features(df)
             
-            # Generate signal
+            # Generate signal (use scalping mode if enabled)
             signal_data = self.technical_analysis.generate_signal(
                 features_df,
-                rsi_oversold=self.config['analysis']['rsi_oversold'],
-                rsi_overbought=self.config['analysis']['rsi_overbought']
+                rsi_oversold=self.config['analysis'].get('rsi_oversold', 25),
+                rsi_overbought=self.config['analysis'].get('rsi_overbought', 75),
+                use_scalping=self.scalping_enabled
             )
             
             # Get prediction
@@ -154,8 +176,10 @@ class AutonomousTradingBot:
                 'signal': signal_data['signal'],
                 'confidence': signal_data['confidence'],
                 'price': signal_data['price'],
-                'rsi': signal_data['rsi'],
-                'macd': signal_data['macd'],
+                'rsi': signal_data.get('rsi', 0),
+                'macd': signal_data.get('macd', 0),
+                'momentum': signal_data.get('momentum', 0),
+                'volume_ratio': signal_data.get('volume_ratio', 0),
                 'prediction': prediction['prediction'],
                 'prediction_confidence': prediction['confidence'],
                 'details': signal_data['reason']
@@ -172,35 +196,44 @@ class AutonomousTradingBot:
     
     def find_trading_opportunities(self) -> List[Dict]:
         """
-        Find trading opportunities across all symbols
+        Find trading opportunities across all symbols (optimized for scalping)
         
         Returns:
             List of trading opportunities
         """
         opportunities = []
         
-        # Analyze Nifty options
-        logger.info("Analyzing Nifty options...")
-        for symbol in self.nifty_symbols:
+        # Use high liquidity symbols for scalping
+        if self.scalping_enabled:
+            symbols_to_analyze = self.symbols_to_trade
+            min_confidence = 0.6  # Higher confidence threshold for scalping
+        else:
+            symbols_to_analyze = self.nifty_symbols + self.stock_symbols
+            min_confidence = 0.5
+        
+        logger.info(f"Analyzing {len(symbols_to_analyze)} symbols...")
+        for symbol in symbols_to_analyze:
             analysis = self.analyze_symbol(symbol)
-            if analysis['signal'] != 'HOLD' and analysis['confidence'] > 0.5:
+            if analysis['signal'] != 'HOLD' and analysis['confidence'] >= min_confidence:
+                # Additional filters for scalping
+                if self.scalping_enabled:
+                    # Check volume requirement
+                    if analysis.get('volume_ratio', 0) < 1.2:
+                        continue
+                    # Check momentum
+                    if abs(analysis.get('momentum', 0)) < 0.05:
+                        continue
+                
                 opportunities.append({
                     **analysis,
-                    'type': 'NIFTY_OPTION'
+                    'type': 'SCALPING' if self.scalping_enabled else 'REGULAR'
                 })
         
-        # Analyze stock options
-        logger.info("Analyzing stock options...")
-        for symbol in self.stock_symbols:
-            analysis = self.analyze_symbol(symbol)
-            if analysis['signal'] != 'HOLD' and analysis['confidence'] > 0.5:
-                opportunities.append({
-                    **analysis,
-                    'type': 'STOCK_OPTION'
-                })
-        
-        # Sort by confidence
-        opportunities.sort(key=lambda x: x['confidence'], reverse=True)
+        # Sort by confidence (and momentum for scalping)
+        if self.scalping_enabled:
+            opportunities.sort(key=lambda x: (x['confidence'], abs(x.get('momentum', 0))), reverse=True)
+        else:
+            opportunities.sort(key=lambda x: x['confidence'], reverse=True)
         
         logger.info(f"Found {len(opportunities)} trading opportunities")
         return opportunities
@@ -286,7 +319,7 @@ class AutonomousTradingBot:
     
     def monitor_positions(self):
         """
-        Monitor active positions and exit if stop-loss or take-profit is hit
+        Monitor active positions and exit if stop-loss, take-profit, or scalping conditions are met
         """
         try:
             positions = self.trading_execution.get_positions()
@@ -298,13 +331,31 @@ class AutonomousTradingBot:
                 if current_price == 0:
                     continue
                 
-                # Check if should exit
-                exit_decision = self.risk_management.should_exit_position(
-                    entry_price=position_info['entry_price'],
-                    current_price=current_price,
-                    side=position_info['side'],
-                    position_type='LONG' if position_info['side'] == 'BUY' else 'SHORT'
-                )
+                # Update highest/lowest price for trailing stop
+                if 'highest_price' not in position_info:
+                    position_info['highest_price'] = current_price
+                    position_info['lowest_price'] = current_price
+                else:
+                    position_info['highest_price'] = max(position_info['highest_price'], current_price)
+                    position_info['lowest_price'] = min(position_info['lowest_price'], current_price)
+                
+                # Check if should exit (use scalping logic if enabled)
+                if self.scalping_enabled:
+                    exit_decision = self.risk_management.should_exit_scalping_position(
+                        entry_price=position_info['entry_price'],
+                        current_price=current_price,
+                        side=position_info['side'],
+                        entry_time=position_info['entry_time'],
+                        highest_price=position_info.get('highest_price'),
+                        lowest_price=position_info.get('lowest_price')
+                    )
+                else:
+                    exit_decision = self.risk_management.should_exit_position(
+                        entry_price=position_info['entry_price'],
+                        current_price=current_price,
+                        side=position_info['side'],
+                        position_type='LONG' if position_info['side'] == 'BUY' else 'SHORT'
+                    )
                 
                 if exit_decision['should_exit']:
                     logger.info(f"Exiting position {symbol}: {exit_decision['reason']}")
@@ -321,7 +372,19 @@ class AutonomousTradingBot:
                         if position_info['side'] == 'SELL':
                             pnl = -pnl
                         
-                        logger.info(f"Position closed: {symbol}, P&L: {pnl:.2f}")
+                        logger.info(f"Position closed: {symbol}, P&L: {pnl:.2f}, Reason: {exit_decision['reason']}")
+                        
+                        # Record trade in profit tracker
+                        self.profit_tracker.record_trade(
+                            symbol=symbol,
+                            side=position_info['side'],
+                            entry_price=position_info['entry_price'],
+                            exit_price=current_price,
+                            quantity=position_info['quantity'],
+                            entry_time=position_info['entry_time'],
+                            exit_time=datetime.now(),
+                            pnl=pnl
+                        )
                         
                         # Remove from active positions
                         del self.active_positions[symbol]
@@ -351,50 +414,84 @@ class AutonomousTradingBot:
     
     def run_cycle(self):
         """
-        Run one trading cycle
+        Run one trading cycle (optimized for scalping)
         """
         try:
             if not self.is_trading_hours():
                 logger.info("Outside trading hours, waiting...")
                 return
             
+            # Check if should continue trading based on profit targets
+            continue_check = self.profit_tracker.should_continue_trading()
+            if not continue_check['should_continue']:
+                logger.warning(f"Stopping trading: {', '.join(continue_check['reasons'])}")
+                logger.info(f"Daily P&L: {continue_check['daily_profit']:.2f}")
+                self.is_running = False
+                return
+            
             logger.info("=" * 50)
-            logger.info("Starting trading cycle")
+            logger.info("Starting trading cycle" + (" [SCALPING MODE]" if self.scalping_enabled else ""))
             logger.info("=" * 50)
             
-            # Monitor existing positions
+            # Show performance summary
+            perf_summary = self.profit_tracker.get_performance_summary()
+            logger.info(f"Today's Performance: Trades: {perf_summary['total_trades']}, "
+                       f"P&L: {perf_summary['profit']:.2f}, "
+                       f"Win Rate: {perf_summary['win_rate']:.2%}")
+            
+            # Monitor existing positions (critical for scalping - check frequently)
             self.monitor_positions()
             
             # Find new opportunities
             opportunities = self.find_trading_opportunities()
             
             # Execute trades for top opportunities
-            max_new_positions = self.config['trading']['max_positions'] - len(self.active_positions)
+            max_positions = (self.config.get('scalping', {}).get('max_positions', 10) 
+                           if self.scalping_enabled 
+                           else self.config['trading']['max_positions'])
+            max_new_positions = max_positions - len(self.active_positions)
             
             for opportunity in opportunities[:max_new_positions]:
                 if opportunity['symbol'] not in self.active_positions:
                     self.execute_trade(opportunity)
-                    time.sleep(1)  # Small delay between trades
+                    time.sleep(0.5 if self.scalping_enabled else 1)  # Faster for scalping
             
-            logger.info(f"Active positions: {len(self.active_positions)}")
+            logger.info(f"Active positions: {len(self.active_positions)}/{max_positions}")
             logger.info("Trading cycle completed")
             
         except Exception as e:
             logger.error(f"Error in trading cycle: {str(e)}")
     
-    def run(self, cycle_interval: int = 300):
+    def run(self, cycle_interval: int = None):
         """
-        Run the bot autonomously
+        Run the bot autonomously (optimized for scalping)
         
         Args:
-            cycle_interval: Time interval between cycles in seconds (default 5 minutes)
+            cycle_interval: Time interval between cycles in seconds (uses config if not provided)
         """
         if not self.initialize():
             logger.error("Failed to initialize bot. Exiting.")
             return
         
+        # Use scalping cycle interval if scalping is enabled
+        if cycle_interval is None:
+            if self.scalping_enabled:
+                cycle_interval = self.config.get('scalping', {}).get('cycle_interval_seconds', 30)
+            else:
+                cycle_interval = 300  # 5 minutes default
+        
         self.is_running = True
-        logger.info(f"Bot started. Running cycles every {cycle_interval} seconds.")
+        mode_str = "SCALPING MODE" if self.scalping_enabled else "REGULAR MODE"
+        logger.info(f"Bot started in {mode_str}. Running cycles every {cycle_interval} seconds.")
+        
+        if self.scalping_enabled:
+            logger.info("Scalping parameters:")
+            logger.info(f"  - Stop Loss: {self.risk_management.stop_loss_percentage}%")
+            logger.info(f"  - Take Profit: {self.risk_management.take_profit_percentage}%")
+            logger.info(f"  - Max Holding Time: {self.risk_management.max_holding_time}s")
+            logger.info(f"  - Quick Exit Threshold: {self.risk_management.quick_exit_threshold}%")
+            logger.info(f"  - Daily Profit Target: ₹{self.profit_tracker.daily_profit_target}")
+            logger.info(f"  - Daily Loss Limit: ₹{self.profit_tracker.daily_loss_limit}")
         
         try:
             while self.is_running:
@@ -407,6 +504,16 @@ class AutonomousTradingBot:
         except KeyboardInterrupt:
             logger.info("Bot stopped by user")
             self.is_running = False
+            # Show final performance summary
+            perf_summary = self.profit_tracker.get_performance_summary()
+            logger.info("=" * 50)
+            logger.info("FINAL PERFORMANCE SUMMARY")
+            logger.info("=" * 50)
+            logger.info(f"Total Trades: {perf_summary['total_trades']}")
+            logger.info(f"Wins: {perf_summary['wins']}, Losses: {perf_summary['losses']}")
+            logger.info(f"Win Rate: {perf_summary['win_rate']:.2%}")
+            logger.info(f"Total P&L: ₹{perf_summary['profit']:.2f}")
+            logger.info(f"Profit Factor: {perf_summary['profit_factor']:.2f}")
         except Exception as e:
             logger.error(f"Fatal error in bot: {str(e)}")
             self.is_running = False
