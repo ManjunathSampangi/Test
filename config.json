@@ -1,0 +1,39 @@
+{
+  "fyers": {
+    "app_id": "YOUR_APP_ID",
+    "secret_key": "YOUR_SECRET_KEY",
+    "redirect_uri": "https://127.0.0.1/",
+    "response_type": "code",
+    "grant_type": "authorization_code"
+  },
+  "trading": {
+    "max_positions": 5,
+    "max_position_size": 10000,
+    "stop_loss_percentage": 2.0,
+    "take_profit_percentage": 3.0,
+    "risk_per_trade": 0.02,
+    "trading_hours_start": "09:15",
+    "trading_hours_end": "15:30"
+  },
+  "symbols": {
+    "nifty_options": ["NSE:NIFTY50-INDEX"],
+    "stock_options": [
+      "NSE:RELIANCE-EQ",
+      "NSE:TCS-EQ",
+      "NSE:HDFCBANK-EQ",
+      "NSE:INFY-EQ",
+      "NSE:ICICIBANK-EQ"
+    ]
+  },
+  "analysis": {
+    "rsi_period": 14,
+    "rsi_oversold": 30,
+    "rsi_overbought": 70,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "bb_period": 20,
+    "bb_std": 2,
+    "lookback_period": 100
+  }
+}
