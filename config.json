@@ -1,0 +1,82 @@
+{
+  "fyers": {
+    "app_id": "YOUR_APP_ID",
+    "secret_key": "YOUR_SECRET_KEY",
+    "redirect_uri": "https://127.0.0.1/",
+    "response_type": "code",
+    "grant_type": "authorization_code"
+  },
+  "scalping": {
+    "enabled": true,
+    "max_positions": 10,
+    "max_position_size": 5000,
+    "stop_loss_percentage": 0.3,
+    "take_profit_percentage": 0.5,
+    "trailing_stop_percentage": 0.2,
+    "risk_per_trade": 0.01,
+    "max_holding_time_seconds": 300,
+    "min_profit_target": 0.2,
+    "quick_exit_threshold": 0.15,
+    "cycle_interval_seconds": 30,
+    "trading_hours_start": "09:15",
+    "trading_hours_end": "15:30",
+    "avoid_volatile_periods": true,
+    "volatile_start": "09:15",
+    "volatile_end": "09:45"
+  },
+  "trading": {
+    "max_positions": 10,
+    "max_position_size": 5000,
+    "stop_loss_percentage": 0.3,
+    "take_profit_percentage": 0.5,
+    "risk_per_trade": 0.01,
+    "trading_hours_start": "09:15",
+    "trading_hours_end": "15:30"
+  },
+  "symbols": {
+    "nifty_options": [
+      "NSE:NIFTY50-INDEX"
+    ],
+    "stock_options": [
+      "NSE:RELIANCE-EQ",
+      "NSE:TCS-EQ",
+      "NSE:HDFCBANK-EQ",
+      "NSE:INFY-EQ",
+      "NSE:ICICIBANK-EQ",
+      "NSE:SBIN-EQ",
+      "NSE:BHARTIARTL-EQ",
+      "NSE:BAJFINANCE-EQ"
+    ],
+    "high_liquidity_symbols": [
+      "NSE:NIFTY50-INDEX",
+      "NSE:BANKNIFTY-INDEX",
+      "NSE:RELIANCE-EQ",
+      "NSE:TCS-EQ",
+      "NSE:HDFCBANK-EQ"
+    ]
+  },
+  "analysis": {
+    "timeframe": "1",
+    "rsi_period": 9,
+    "rsi_oversold": 25,
+    "rsi_overbought": 75,
+    "macd_fast": 8,
+    "macd_slow": 21,
+    "macd_signal": 5,
+    "bb_period": 10,
+    "bb_std": 1.5,
+    "ema_fast": 5,
+    "ema_slow": 13,
+    "volume_threshold_multiplier": 1.5,
+    "lookback_period": 50,
+    "min_volume": 10000,
+    "momentum_threshold": 0.1
+  },
+  "profit_tracking": {
+    "daily_profit_target": 5000,
+    "daily_loss_limit": -3000,
+    "track_performance": true,
+    "min_win_rate": 0.55,
+    "min_profit_factor": 1.5
+  }
+}

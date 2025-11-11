@@ -1,0 +1,8 @@
+fyers-apiv2==3.0.8
+pandas==2.1.4
+numpy==1.26.2
+scikit-learn==1.3.2
+python-dotenv==1.0.0
+requests==2.31.0
+websocket-client==1.6.4
+schedule==1.2.0
