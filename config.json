@@ -22,7 +22,11 @@
     "trading_hours_end": "15:30",
     "avoid_volatile_periods": true,
     "volatile_start": "09:15",
-    "volatile_end": "09:45"
+    "volatile_end": "09:45",
+    "min_profit_to_protect": 0.1,
+    "breakeven_profit_threshold": 0.2,
+    "min_risk_reward_ratio": 3.0,
+    "max_loss_before_exit": 0.05
   },
   "trading": {
     "max_positions": 10,
@@ -31,7 +35,11 @@
     "take_profit_percentage": 0.5,
     "risk_per_trade": 0.01,
     "trading_hours_start": "09:15",
-    "trading_hours_end": "15:30"
+    "trading_hours_end": "15:30",
+    "min_profit_to_protect": 0.1,
+    "breakeven_profit_threshold": 0.2,
+    "min_risk_reward_ratio": 3.0,
+    "max_loss_before_exit": 0.05
   },
   "symbols": {
     "nifty_options": [
@@ -77,6 +85,8 @@
     "daily_loss_limit": -3000,
     "track_performance": true,
     "min_win_rate": 0.55,
-    "min_profit_factor": 1.5
+    "min_profit_factor": 1.5,
+    "zero_loss_policy": true,
+    "stop_on_any_loss": true
   }
 }

@@ -43,6 +43,14 @@ class RiskManagement:
             self.max_holding_time = None
             self.quick_exit_threshold = None
         
+        # Zero-loss strategy parameters (read from config or scalping_config)
+        source_config = self.scalping_config if self.scalping_config.get('enabled', False) else config
+        self.enable_zero_loss = True  # Always enabled for positive profit requirement
+        self.min_profit_to_protect = source_config.get('min_profit_to_protect', 0.1)  # Exit on 0.1% profit
+        self.breakeven_profit_threshold = source_config.get('breakeven_profit_threshold', 0.2)  # Move to breakeven at 0.2%
+        self.min_risk_reward_ratio = source_config.get('min_risk_reward_ratio', 3.0)  # Minimum 1:3 risk/reward
+        self.max_loss_before_exit = source_config.get('max_loss_before_exit', 0.05)  # Exit if loss exceeds 0.05%
+        
     def calculate_position_size(self, account_value: float, entry_price: float,
                                stop_loss_price: float, risk_amount: Optional[float] = None) -> int:
         """
@@ -160,6 +168,7 @@ class RiskManagement:
                            side: str, position_type: str = 'LONG') -> Dict[str, any]:
         """
         Determine if position should be exited based on stop-loss or take-profit
+        Includes zero-loss strategy for regular trading
         
         Args:
             entry_price: Entry price
@@ -170,6 +179,31 @@ class RiskManagement:
         Returns:
             Dictionary with exit decision and reason
         """
+        # Calculate profit percentage
+        profit_pct = ((current_price - entry_price) / entry_price) * 100
+        if side == 'SELL':
+            profit_pct = -profit_pct
+        
+        # ZERO-LOSS STRATEGY: Exit immediately on ANY profit (even tiny)
+        if self.enable_zero_loss and profit_pct >= self.min_profit_to_protect:
+            return {
+                'should_exit': True,
+                'reason': 'IMMEDIATE_PROFIT_PROTECTION',
+                'profit_pct': profit_pct,
+                'current_price': current_price,
+                'message': f'Exiting with {profit_pct:.2f}% profit to ensure no loss'
+            }
+        
+        # ZERO-LOSS STRATEGY: Exit if loss exceeds maximum allowed
+        if self.enable_zero_loss and profit_pct <= -self.max_loss_before_exit:
+            return {
+                'should_exit': True,
+                'reason': 'MAX_LOSS_EXCEEDED',
+                'profit_pct': profit_pct,
+                'current_price': current_price,
+                'message': f'Exiting to prevent larger loss: {profit_pct:.2f}%'
+            }
+        
         stop_loss = self.calculate_stop_loss(entry_price, side)
         take_profit = self.calculate_take_profit(entry_price, side)
         
@@ -209,7 +243,8 @@ class RiskManagement:
             'reason': 'HOLD',
             'stop_loss': stop_loss,
             'take_profit': take_profit,
-            'current_price': current_price
+            'current_price': current_price,
+            'profit_pct': profit_pct
         }
     
     def validate_trade(self, account_value: float, entry_price: float,
@@ -246,9 +281,10 @@ class RiskManagement:
     def should_exit_scalping_position(self, entry_price: float, current_price: float,
                                      side: str, entry_time: datetime, 
                                      highest_price: float = None, 
-                                     lowest_price: float = None) -> Dict[str, any]:
+                                     lowest_price: float = None,
+                                     breakeven_activated: bool = False) -> Dict[str, any]:
         """
-        Determine if scalping position should be exited (with trailing stop and time-based exit)
+        Determine if scalping position should be exited (with zero-loss strategy)
         
         Args:
             entry_price: Entry price
@@ -257,29 +293,63 @@ class RiskManagement:
             entry_time: Entry timestamp
             highest_price: Highest price since entry (for trailing stop)
             lowest_price: Lowest price since entry (for trailing stop)
+            breakeven_activated: Whether breakeven stop has been activated
             
         Returns:
             Dictionary with exit decision and reason
         """
         from datetime import datetime, timedelta
         
+        # Calculate profit percentage
+        profit_pct = ((current_price - entry_price) / entry_price) * 100
+        if side == 'SELL':
+            profit_pct = -profit_pct
+        
+        # ZERO-LOSS STRATEGY: Exit immediately on ANY profit (even tiny)
+        if self.enable_zero_loss and profit_pct >= self.min_profit_to_protect:
+            return {
+                'should_exit': True,
+                'reason': 'IMMEDIATE_PROFIT_PROTECTION',
+                'profit_pct': profit_pct,
+                'current_price': current_price,
+                'message': f'Exiting with {profit_pct:.2f}% profit to ensure no loss'
+            }
+        
+        # ZERO-LOSS STRATEGY: Exit if loss exceeds maximum allowed
+        if self.enable_zero_loss and profit_pct <= -self.max_loss_before_exit:
+            return {
+                'should_exit': True,
+                'reason': 'MAX_LOSS_EXCEEDED',
+                'profit_pct': profit_pct,
+                'current_price': current_price,
+                'message': f'Exiting to prevent larger loss: {profit_pct:.2f}%'
+            }
+        
         # Check max holding time
         if self.max_holding_time:
             holding_time = (datetime.now() - entry_time).total_seconds()
             if holding_time >= self.max_holding_time:
-                return {
-                    'should_exit': True,
-                    'reason': 'MAX_HOLDING_TIME',
-                    'holding_time': holding_time,
-                    'current_price': current_price
-                }
+                # If in profit, exit; if in loss, exit to prevent further loss
+                if profit_pct > 0:
+                    return {
+                        'should_exit': True,
+                        'reason': 'MAX_HOLDING_TIME_PROFIT',
+                        'holding_time': holding_time,
+                        'profit_pct': profit_pct,
+                        'current_price': current_price
+                    }
+                else:
+                    return {
+                        'should_exit': True,
+                        'reason': 'MAX_HOLDING_TIME_LOSS',
+                        'holding_time': holding_time,
+                        'profit_pct': profit_pct,
+                        'current_price': current_price,
+                        'message': 'Exiting at max holding time to prevent loss'
+                    }
         
         # Quick exit threshold (small profit, exit quickly)
         if self.quick_exit_threshold:
-            profit_pct = ((current_price - entry_price) / entry_price) * 100
-            if side == 'SELL':
-                profit_pct = -profit_pct
-            
             if profit_pct >= self.quick_exit_threshold:
                 return {
                     'should_exit': True,
@@ -288,11 +358,27 @@ class RiskManagement:
                     'current_price': current_price
                 }
         
-        # Regular stop loss and take profit
-        stop_loss = self.calculate_stop_loss(entry_price, side)
+        # Calculate dynamic stop loss (breakeven if profit threshold reached)
+        if self.enable_zero_loss and profit_pct >= self.breakeven_profit_threshold:
+            # Move stop loss to breakeven (entry price)
+            stop_loss = entry_price
+            breakeven_activated = True
+        else:
+            stop_loss = self.calculate_stop_loss(entry_price, side)
+        
         take_profit = self.calculate_take_profit(entry_price, side)
         
         if side == 'BUY':
+            # Exit if price hits breakeven stop (protecting profit)
+            if breakeven_activated and current_price <= stop_loss:
+                return {
+                    'should_exit': True,
+                    'reason': 'BREAKEVEN_STOP',
+                    'trigger_price': stop_loss,
+                    'current_price': current_price,
+                    'message': 'Exiting at breakeven to protect profit'
+                }
+            
             if current_price <= stop_loss:
                 return {
                     'should_exit': True,
@@ -320,6 +406,16 @@ class RiskManagement:
                         'highest_price': highest_price
                     }
         else:  # SELL
+            # Exit if price hits breakeven stop (protecting profit)
+            if breakeven_activated and current_price >= stop_loss:
+                return {
+                    'should_exit': True,
+                    'reason': 'BREAKEVEN_STOP',
+                    'trigger_price': stop_loss,
+                    'current_price': current_price,
+                    'message': 'Exiting at breakeven to protect profit'
+                }
+            
             if current_price >= stop_loss:
                 return {
                     'should_exit': True,
@@ -352,5 +448,47 @@ class RiskManagement:
             'reason': 'HOLD',
             'stop_loss': stop_loss,
             'take_profit': take_profit,
-            'current_price': current_price
+            'current_price': current_price,
+            'breakeven_activated': breakeven_activated,
+            'profit_pct': profit_pct
+        }
+    
+    def validate_risk_reward_ratio(self, entry_price: float, stop_loss_price: float, 
+                                   take_profit_price: float, side: str) -> Dict[str, any]:
+        """
+        Validate that trade has favorable risk/reward ratio
+        
+        Args:
+            entry_price: Entry price
+            stop_loss_price: Stop loss price
+            take_profit_price: Take profit price
+            side: 'BUY' or 'SELL'
+            
+        Returns:
+            Validation result with risk/reward ratio
+        """
+        if side == 'BUY':
+            risk = abs(entry_price - stop_loss_price)
+            reward = abs(take_profit_price - entry_price)
+        else:  # SELL
+            risk = abs(stop_loss_price - entry_price)
+            reward = abs(entry_price - take_profit_price)
+        
+        if risk == 0:
+            return {
+                'valid': False,
+                'risk_reward_ratio': 0,
+                'message': 'Risk is zero, cannot calculate ratio'
+            }
+        
+        risk_reward_ratio = reward / risk
+        
+        is_valid = risk_reward_ratio >= self.min_risk_reward_ratio
+        
+        return {
+            'valid': is_valid,
+            'risk_reward_ratio': risk_reward_ratio,
+            'risk': risk,
+            'reward': reward,
+            'message': f'Risk/Reward: {risk_reward_ratio:.2f} (min: {self.min_risk_reward_ratio:.2f})' if is_valid else f'Risk/Reward too low: {risk_reward_ratio:.2f} < {self.min_risk_reward_ratio:.2f}'
         }
