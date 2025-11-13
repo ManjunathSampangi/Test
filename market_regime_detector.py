@@ -140,11 +140,25 @@ class MarketRegimeDetector:
     def _analyze_volume_profile(self, df: pd.DataFrame) -> Dict:
         """Analyze volume profile"""
         volume_ma = df['volume'].rolling(20).mean()
-        current_volume = df['volume'].iloc[-1]
-        volume_ratio = current_volume / volume_ma.iloc[-1] if volume_ma.iloc[-1] > 0 else 1.0
+        try:
+            current_volume = df['volume'].iloc[-1] if len(df) > 0 else 0
+            volume_ma_val = volume_ma.iloc[-1] if len(volume_ma) > 0 and pd.notna(volume_ma.iloc[-1]) else 1.0
+            volume_ratio = current_volume / volume_ma_val if volume_ma_val > 0 else 1.0
+            if pd.isna(volume_ratio):
+                volume_ratio = 1.0
+        except (IndexError, KeyError, ZeroDivisionError):
+            volume_ratio = 1.0
         
         # Volume trend
-        volume_trend = 'INCREASING' if df['volume'].iloc[-5:].mean() > df['volume'].iloc[-15:-5].mean() else 'DECREASING'
+        try:
+            if len(df) >= 15:
+                vol_recent = df['volume'].iloc[-5:].mean() if len(df) >= 5 else 0
+                vol_prev = df['volume'].iloc[-15:-5].mean() if len(df) >= 15 else 0
+                volume_trend = 'INCREASING' if pd.notna(vol_recent) and pd.notna(vol_prev) and vol_recent > vol_prev else 'DECREASING'
+            else:
+                volume_trend = 'UNKNOWN'
+        except Exception:
+            volume_trend = 'UNKNOWN'
         
         return {
             'volume_ratio': volume_ratio,

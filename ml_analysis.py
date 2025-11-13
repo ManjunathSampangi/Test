@@ -243,16 +243,27 @@ class MLAnalysis:
             return {'prediction': 'HOLD', 'confidence': 0.0}
         
         # Simple momentum-based prediction
-        returns_5 = df['close'].pct_change(5).iloc[-1]
-        returns_10 = df['close'].pct_change(10).iloc[-1]
-        
-        if returns_5 > 0.01 and returns_10 > 0:
-            signal = 'BUY'
-            confidence = min(abs(returns_5) * 10, 0.7)
-        elif returns_5 < -0.01 and returns_10 < 0:
-            signal = 'SELL'
-            confidence = min(abs(returns_5) * 10, 0.7)
-        else:
+        try:
+            if len(df) >= 10:
+                returns_5 = df['close'].pct_change(5).iloc[-1]
+                returns_10 = df['close'].pct_change(10).iloc[-1]
+                
+                returns_5 = returns_5 if pd.notna(returns_5) else 0
+                returns_10 = returns_10 if pd.notna(returns_10) else 0
+                
+                if returns_5 > 0.01 and returns_10 > 0:
+                    signal = 'BUY'
+                    confidence = min(abs(returns_5) * 10, 0.7)
+                elif returns_5 < -0.01 and returns_10 < 0:
+                    signal = 'SELL'
+                    confidence = min(abs(returns_5) * 10, 0.7)
+                else:
+                    signal = 'HOLD'
+                    confidence = 0.0
+            else:
+                signal = 'HOLD'
+                confidence = 0.0
+        except (IndexError, KeyError):
             signal = 'HOLD'
             confidence = 0.0
         

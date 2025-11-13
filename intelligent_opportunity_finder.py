@@ -175,36 +175,66 @@ class IntelligentOpportunityFinder:
         
         # Volume filter
         if 'volume_ratio' in analysis:
-            if analysis['volume_ratio'] < volume_multiplier:
+            vol_ratio = analysis.get('volume_ratio', 0)
+            if pd.isna(vol_ratio) or vol_ratio < volume_multiplier:
                 return False
         else:
             # Calculate volume ratio
-            volume_ma = df['volume'].rolling(20).mean().iloc[-1]
-            current_volume = df['volume'].iloc[-1]
-            if current_volume / volume_ma < volume_multiplier:
+            if len(df) < 20:
+                return False
+            try:
+                volume_ma = df['volume'].rolling(20).mean().iloc[-1]
+                current_volume = df['volume'].iloc[-1]
+                if pd.isna(volume_ma) or volume_ma == 0:
+                    return False
+                if pd.isna(current_volume) or current_volume / volume_ma < volume_multiplier:
+                    return False
+            except (IndexError, KeyError):
                 return False
         
         # Price action filter
-        if not self._has_good_price_action(df):
+        try:
+            if not self._has_good_price_action(df):
+                return False
+        except Exception:
             return False
         
         # Volatility filter (avoid extreme volatility)
-        volatility = df['close'].pct_change().rolling(10).std().iloc[-1]
-        if volatility > 0.05:  # Too volatile
+        if len(df) < 10:
+            return False
+        try:
+            volatility = df['close'].pct_change().rolling(10).std().iloc[-1]
+            if pd.isna(volatility) or volatility > 0.05:  # Too volatile
+                return False
+        except (IndexError, KeyError):
             return False
         
         return True
     
     def _has_good_price_action(self, df: pd.DataFrame) -> bool:
         """Check if price action is favorable"""
-        # Check for consistent trend or clear reversal
-        recent_returns = df['close'].pct_change().tail(5)
-        
-        # Avoid choppy markets
-        if recent_returns.std() > recent_returns.mean() * 2:
+        try:
+            if len(df) < 5:
+                return False
+            # Check for consistent trend or clear reversal
+            recent_returns = df['close'].pct_change().tail(5)
+            
+            if len(recent_returns) == 0:
+                return False
+            
+            # Avoid choppy markets
+            returns_mean = recent_returns.mean()
+            returns_std = recent_returns.std()
+            
+            if pd.isna(returns_mean) or pd.isna(returns_std):
+                return False
+            
+            if returns_mean != 0 and returns_std > abs(returns_mean) * 2:
+                return False
+            
+            return True
+        except Exception:
             return False
-        
-        return True
     
     def _is_high_probability_setup(self, df: pd.DataFrame, analysis: Dict) -> bool:
         """Check if this is a high-probability setup"""
@@ -212,14 +242,24 @@ class IntelligentOpportunityFinder:
         confirmations = 0
         
         # Volume confirmation
-        volume_ma = df['volume'].rolling(20).mean().iloc[-1]
-        if df['volume'].iloc[-1] > volume_ma * 1.5:
-            confirmations += 1
+        try:
+            if len(df) >= 20:
+                volume_ma = df['volume'].rolling(20).mean().iloc[-1]
+                current_volume = df['volume'].iloc[-1]
+                if pd.notna(volume_ma) and volume_ma > 0 and pd.notna(current_volume):
+                    if current_volume > volume_ma * 1.5:
+                        confirmations += 1
+        except (IndexError, KeyError):
+            pass
         
         # Price momentum confirmation
-        momentum = df['close'].pct_change(5).iloc[-1]
-        if abs(momentum) > 0.02:
-            confirmations += 1
+        try:
+            if len(df) >= 5:
+                momentum = df['close'].pct_change(5).iloc[-1]
+                if pd.notna(momentum) and abs(momentum) > 0.02:
+                    confirmations += 1
+        except (IndexError, KeyError):
+            pass
         
         # Technical indicator alignment
         if analysis['confidence'] > 0.7:
@@ -242,15 +282,26 @@ class IntelligentOpportunityFinder:
         score += analysis['confidence'] * 0.4
         
         # Volume quality (20%)
-        volume_ma = df['volume'].rolling(20).mean().iloc[-1]
-        volume_ratio = df['volume'].iloc[-1] / volume_ma if volume_ma > 0 else 1.0
-        volume_score = min(volume_ratio / 2.0, 1.0)  # Cap at 2x average
-        score += volume_score * 0.2
+        try:
+            if len(df) >= 20:
+                volume_ma = df['volume'].rolling(20).mean().iloc[-1]
+                current_volume = df['volume'].iloc[-1]
+                if pd.notna(volume_ma) and volume_ma > 0 and pd.notna(current_volume):
+                    volume_ratio = current_volume / volume_ma
+                    volume_score = min(volume_ratio / 2.0, 1.0)  # Cap at 2x average
+                    score += volume_score * 0.2
+        except (IndexError, KeyError, ZeroDivisionError):
+            pass
         
         # Price momentum (15%)
-        momentum = abs(df['close'].pct_change(5).iloc[-1])
-        momentum_score = min(momentum / 0.05, 1.0)  # Normalize to 5% move
-        score += momentum_score * 0.15
+        try:
+            if len(df) >= 5:
+                momentum = abs(df['close'].pct_change(5).iloc[-1])
+                if pd.notna(momentum):
+                    momentum_score = min(momentum / 0.05, 1.0) if momentum > 0 else 0  # Normalize to 5% move
+                    score += momentum_score * 0.15
+        except (IndexError, KeyError):
+            pass
         
         # Risk-reward ratio (15%)
         risk_reward = self._calculate_risk_reward(df, analysis)
@@ -287,9 +338,29 @@ class IntelligentOpportunityFinder:
     
     def _analyze_market_conditions(self, df: pd.DataFrame) -> Dict:
         """Analyze current market conditions"""
-        volatility = df['close'].pct_change().rolling(20).std().iloc[-1]
-        trend = 'UP' if df['close'].iloc[-1] > df['close'].iloc[-20] else 'DOWN'
-        volume_trend = 'INCREASING' if df['volume'].iloc[-5:].mean() > df['volume'].iloc[-20:-5].mean() else 'DECREASING'
+        try:
+            if len(df) < 20:
+                volatility = 0.02
+                trend = 'UNKNOWN'
+                volume_trend = 'UNKNOWN'
+            else:
+                volatility_val = df['close'].pct_change().rolling(20).std().iloc[-1]
+                volatility = volatility_val if pd.notna(volatility_val) else 0.02
+                
+                close_current = df['close'].iloc[-1] if pd.notna(df['close'].iloc[-1]) else 0
+                close_20 = df['close'].iloc[-20] if len(df) >= 20 and pd.notna(df['close'].iloc[-20]) else close_current
+                trend = 'UP' if close_current > close_20 else 'DOWN'
+                
+                if len(df) >= 20:
+                    vol_recent = df['volume'].iloc[-5:].mean() if len(df) >= 5 else 0
+                    vol_prev = df['volume'].iloc[-20:-5].mean() if len(df) >= 20 else 0
+                    volume_trend = 'INCREASING' if pd.notna(vol_recent) and pd.notna(vol_prev) and vol_recent > vol_prev else 'DECREASING'
+                else:
+                    volume_trend = 'UNKNOWN'
+        except Exception:
+            volatility = 0.02
+            trend = 'UNKNOWN'
+            volume_trend = 'UNKNOWN'
         
         return {
             'volatility': volatility,
@@ -300,15 +371,21 @@ class IntelligentOpportunityFinder:
     
     def _analyze_market_conditions_score(self, df: pd.DataFrame) -> float:
         """Score market conditions (0-1)"""
-        volatility = df['close'].pct_change().rolling(20).std().iloc[-1]
-        
-        # Prefer moderate volatility (not too low, not too high)
-        if 0.01 < volatility < 0.03:
-            return 1.0
-        elif 0.005 < volatility < 0.04:
-            return 0.7
-        else:
-            return 0.4
+        try:
+            if len(df) < 20:
+                return 0.5
+            volatility_val = df['close'].pct_change().rolling(20).std().iloc[-1]
+            volatility = volatility_val if pd.notna(volatility_val) else 0.02
+            
+            # Prefer moderate volatility (not too low, not too high)
+            if 0.01 < volatility < 0.03:
+                return 1.0
+            elif 0.005 < volatility < 0.04:
+                return 0.7
+            else:
+                return 0.4
+        except Exception:
+            return 0.5
     
     def _calculate_min_confidence(self, recent_performance: Dict) -> float:
         """Calculate minimum confidence based on recent performance"""

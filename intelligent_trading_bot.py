@@ -132,8 +132,17 @@ class IntelligentTradingBot:
     def _train_ml_models(self):
         """Train ML models on historical data"""
         try:
+            # Check if market_data is initialized
+            if self.market_data is None:
+                logger.warning("Market data not initialized, skipping ML training")
+                return
+            
             # Try to get historical data for training
-            training_symbols = self.symbols_to_trade[:3]  # Use first 3 symbols
+            training_symbols = self.symbols_to_trade[:3] if len(self.symbols_to_trade) >= 3 else self.symbols_to_trade
+            
+            if not training_symbols:
+                logger.warning("No symbols available for ML training")
+                return
             
             all_data = []
             for symbol in training_symbols:
@@ -146,14 +155,31 @@ class IntelligentTradingBot:
                     )
                     if not df.empty and len(df) > 100:
                         all_data.append(df)
-                except:
+                except Exception as e:
+                    logger.debug(f"Could not get data for {symbol}: {str(e)}")
                     continue
             
             if all_data:
-                # Combine data
-                combined_df = pd.concat(all_data, ignore_index=True) if len(all_data) > 1 else all_data[0]
-                self.ml_analysis.train_models(combined_df)
-                logger.info("ML models trained successfully")
+                # Combine data - ensure all dataframes have same columns
+                try:
+                    if len(all_data) > 1:
+                        # Check if columns match
+                        first_cols = set(all_data[0].columns)
+                        if all(set(df.columns) == first_cols for df in all_data[1:]):
+                            combined_df = pd.concat(all_data, ignore_index=True)
+                        else:
+                            # Use first dataframe if columns don't match
+                            combined_df = all_data[0]
+                    else:
+                        combined_df = all_data[0]
+                    
+                    if not combined_df.empty and len(combined_df) > 100:
+                        self.ml_analysis.train_models(combined_df)
+                        logger.info("ML models trained successfully")
+                    else:
+                        logger.warning("Insufficient combined data for ML training")
+                except Exception as e:
+                    logger.warning(f"Error combining dataframes: {str(e)}")
             else:
                 logger.warning("Insufficient data for ML training, using rule-based predictions")
         except Exception as e:
@@ -326,12 +352,16 @@ class IntelligentTradingBot:
         }
         
         # Use intelligent opportunity finder
+        if self.market_data is None:
+            logger.error("Market data not initialized")
+            return []
+        
         if self.recent_performance['recent_loss'] < 0:
             # After loss, use recovery mode
             opportunities = self.opportunity_finder.find_opportunities_after_loss(
                 symbols=self.symbols_to_trade,
-                market_data_func=lambda s: self.market_data.get_historical_data(s, resolution='1'),
-                analysis_func=lambda df: self.advanced_strategies.analyze_with_all_strategies(df),
+                market_data_func=lambda s: self.market_data.get_historical_data(s, resolution='1') if self.market_data else pd.DataFrame(),
+                analysis_func=lambda df: self.advanced_strategies.analyze_with_all_strategies(df) if not df.empty else {'signal': 'HOLD', 'confidence': 0.0},
                 loss_amount=abs(self.recent_performance['recent_loss']),
                 recent_trades=recent_trades
             )
@@ -339,8 +369,8 @@ class IntelligentTradingBot:
             # Normal mode
             opportunities = self.opportunity_finder.find_opportunities(
                 symbols=self.symbols_to_trade,
-                market_data_func=lambda s: self.market_data.get_historical_data(s, resolution='1'),
-                analysis_func=lambda df: self.advanced_strategies.analyze_with_all_strategies(df),
+                market_data_func=lambda s: self.market_data.get_historical_data(s, resolution='1') if self.market_data else pd.DataFrame(),
+                analysis_func=lambda df: self.advanced_strategies.analyze_with_all_strategies(df) if not df.empty else {'signal': 'HOLD', 'confidence': 0.0},
                 recent_performance=self.recent_performance
             )
         
@@ -359,7 +389,21 @@ class IntelligentTradingBot:
             
             # Get current positions
             positions = self.trading_execution.get_positions()
-            current_position_count = len([p for p in positions if float(p.get('qty', 0)) != 0])
+            current_position_count = 0
+            for p in positions:
+                try:
+                    qty = p.get('qty', 0)
+                    if isinstance(qty, (int, float)):
+                        if float(qty) != 0:
+                            current_position_count += 1
+                    elif isinstance(qty, str):
+                        try:
+                            if float(qty) != 0:
+                                current_position_count += 1
+                        except (ValueError, TypeError):
+                            continue
+                except (ValueError, TypeError, AttributeError):
+                    continue
             
             # Calculate stop loss
             stop_loss = self.risk_management.calculate_stop_loss(price, signal)
