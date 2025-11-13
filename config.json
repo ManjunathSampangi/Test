@@ -78,5 +78,35 @@
     "track_performance": true,
     "min_win_rate": 0.55,
     "min_profit_factor": 1.5
+  },
+  "strategies": {
+    "momentum_weight": 0.25,
+    "mean_reversion_weight": 0.20,
+    "breakout_weight": 0.20,
+    "trend_following_weight": 0.15,
+    "volume_profile_weight": 0.10,
+    "arbitrage_weight": 0.10
+  },
+  "opportunity_finder": {
+    "min_confidence_after_loss": 0.75,
+    "min_confidence_normal": 0.60,
+    "volume_multiplier_base": 1.5,
+    "volume_multiplier_after_loss": 1.8,
+    "quality_score_threshold": 0.7,
+    "high_probability_confirmations": 2
+  },
+  "ml_analysis": {
+    "enabled": true,
+    "train_on_startup": true,
+    "min_training_data_points": 100,
+    "ensemble_weights": {
+      "random_forest": 0.5,
+      "gradient_boosting": 0.5
+    }
+  },
+  "regime_detector": {
+    "enabled": true,
+    "update_interval_seconds": 300,
+    "regime_history_size": 100
   }
 }
