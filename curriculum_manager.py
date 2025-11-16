@@ -71,7 +71,18 @@ class CurriculumManager:
         return curriculum
     
     def _get_topics_for_subject(self, grade: int, subject: str) -> List[Dict]:
-        """Get topics for a subject and grade"""
+        """Get topics for a subject and grade - Uses NCERT Syllabus"""
+        try:
+            from syllabus_knowledge import get_topics_for_subject as get_ncert_topics
+            ncert_topics = get_ncert_topics(grade, subject)
+            if ncert_topics:
+                # Convert NCERT format to our format
+                return [{"name": t.get("name", ""), "completed": False, "english": t.get("english", ""), 
+                        "description": t.get("description", "")} for t in ncert_topics]
+        except ImportError:
+            logger.warning("syllabus_knowledge not available, using fallback")
+        
+        # Fallback to basic topics if NCERT syllabus not available
         topics_map = {
             "math": {
                 1: ["संख्या 1-100", "जोड़", "घटाव", "आकार", "माप"],
@@ -123,7 +134,6 @@ class CurriculumManager:
         }
         
         topics_list = topics_map.get(subject, {}).get(grade, [])
-        
         return [{"name": topic, "completed": False} for topic in topics_list]
     
     def get_next_subject(self, student_profile) -> str:
@@ -252,7 +262,16 @@ Now you must have understood {topic} well. If you have any questions, feel free 
         return content.strip()
     
     def get_learning_objectives(self, grade: int, subject: str, topic: str) -> List[str]:
-        """Get learning objectives for a topic"""
+        """Get learning objectives for a topic - Uses NCERT Syllabus"""
+        try:
+            from syllabus_knowledge import get_learning_objectives as get_ncert_objectives
+            ncert_objectives = get_ncert_objectives(grade, subject)
+            if ncert_objectives:
+                return ncert_objectives
+        except ImportError:
+            logger.debug("syllabus_knowledge not available, using fallback")
+        
+        # Fallback objectives
         objectives = {
             "hi": [
                 f"{topic} को समझना",
