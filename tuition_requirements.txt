@@ -1,0 +1,25 @@
+# Core dependencies
+python-dotenv==1.0.0
+requests==2.31.0
+
+# Text-to-Speech
+gtts==2.5.1
+pyttsx3==2.90
+TTS>=0.20.0
+
+# Video generation
+moviepy==1.0.3
+pillow==10.1.0
+matplotlib==3.8.2
+numpy==1.26.2
+
+# AI/ML for Q&A and content generation
+openai>=1.0.0
+transformers>=4.35.0
+torch>=2.0.0
+
+# Data handling
+pandas==2.1.4
+
+# Utilities
+schedule==1.2.0
