@@ -175,9 +175,23 @@ class CurriculumManager:
         """
         logger.info(f"Generating lesson content for grade {grade}, {subject}: {topic}")
         
-        # Build content based on grade and topic
-        content = self._build_lesson_content(grade, subject, topic, language, learning_style)
+        # Use AI-powered content generator if available
+        try:
+            from content_generator import ContentGenerator
+            generator = ContentGenerator(use_ai=True)
+            content = generator.generate_lesson_content(
+                grade=grade,
+                subject=subject,
+                topic=topic,
+                language=language,
+                learning_style=learning_style
+            )
+            return content
+        except ImportError:
+            logger.warning("ContentGenerator not available, using template-based generation")
         
+        # Fallback to template-based content
+        content = self._build_lesson_content(grade, subject, topic, language, learning_style)
         return content
     
     def _build_lesson_content(self, grade: int, subject: str, topic: str,

@@ -97,18 +97,39 @@ class QASystem:
         
         logger.info(f"Answering question in {lang}: {question[:50]}...")
         
-        # Get conversation history if available
-        history = None
-        if student_id and student_id in self.conversation_history:
-            history = self.conversation_history[student_id]
+        # Extract topic from question/context
+        topic = self._extract_topic_from_question(question, context)
         
-        # Generate answer based on model type
-        if self.qa_model == "openai":
-            answer = self._answer_with_openai(question, lang, grade, context, history)
-        elif isinstance(self.qa_model, pipeline):
-            answer = self._answer_with_transformers(question, lang, grade, context)
-        else:
-            answer = self._answer_rule_based(question, lang, grade, context)
+        # Try using AI content generator for better explanations
+        try:
+            from content_generator import ContentGenerator
+            generator = ContentGenerator(use_ai=True)
+            ai_answer = generator.generate_explanation(
+                question=question,
+                topic=topic,
+                grade=grade or 5,
+                language=lang,
+                context=context
+            )
+            if ai_answer and len(ai_answer) > 50:  # Valid answer
+                answer = ai_answer
+            else:
+                raise ValueError("AI answer too short")
+        except Exception as e:
+            logger.debug(f"AI content generator not available or failed: {e}")
+            # Fallback to standard Q&A
+            # Get conversation history if available
+            history = None
+            if student_id and student_id in self.conversation_history:
+                history = self.conversation_history[student_id]
+            
+            # Generate answer based on model type
+            if self.qa_model == "openai":
+                answer = self._answer_with_openai(question, lang, grade, context, history)
+            elif isinstance(self.qa_model, pipeline):
+                answer = self._answer_with_transformers(question, lang, grade, context)
+            else:
+                answer = self._answer_rule_based(question, lang, grade, context)
         
         # Store in conversation history
         if student_id:
@@ -124,6 +145,21 @@ class QASystem:
                 self.conversation_history[student_id] = self.conversation_history[student_id][-5:]
         
         return answer
+    
+    def _extract_topic_from_question(self, question: str, context: Optional[str] = None) -> str:
+        """Extract topic from question or context"""
+        # Simple keyword extraction
+        if context:
+            # Try to find topic in context
+            sentences = context.split('.')[:3]
+            for sentence in sentences:
+                words = sentence.split()[:5]
+                if words:
+                    return ' '.join(words)
+        
+        # Extract from question
+        question_words = question.split()[:3]
+        return ' '.join(question_words) if question_words else "general"
     
     def _answer_with_openai(self, question: str, language: str, grade: Optional[int],
                            context: Optional[str], history: Optional[List]) -> str:
